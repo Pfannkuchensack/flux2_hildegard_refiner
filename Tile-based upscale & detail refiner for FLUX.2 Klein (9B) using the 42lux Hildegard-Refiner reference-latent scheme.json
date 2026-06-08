@@ -1,0 +1,1339 @@
+{
+  "name": "Tile-based upscale & detail refiner for FLUX.2 Klein (9B) using the 42lux Hildegard-Refiner reference-latent scheme",
+  "author": "Pfannkuchensack",
+  "description": "Tile-based upscale & detail refiner for FLUX.2 Klein (9B) using the 42lux\nHildegard-Refiner reference-latent scheme. Requires the Hildegard LoRA.",
+  "version": "1.0",
+  "contact": "",
+  "tags": "upscale,klein9b",
+  "notes": "FLUX.2 Klein — Hildegard Tile Refiner\n\nA tile-based upscale & detail refiner for FLUX.2 Klein, porting the 42lux\nHildegard-Refiner reference-latent scheme. It upscales the source image,\ncuts it into overlapping tiles, and regenerates each tile with FLUX.2 guided\nby three references — the tile crop, a 3x3 position map, and a global\nthumbnail — then stitches the tiles back into one image.\n\nREQUIREMENTS\n- FLUX.2 Klein 9B transformer. The Hildegard LoRA is trained for 9B and will\n  NOT load on the 4B model. A GGUF/fp8 9B works (the LoRA is applied via\n  sidecar).\n- Hildegard-Refiner LoRA (huggingface.co/42lux/hildegard) — mandatory. Without\n  it the model cannot read the reference latents.\n- FLUX.2 VAE and a Qwen3 text encoder.\n\nPROMPT\nStart the prompt with the trigger \"RFNTILE.\" followed by a short instruction\nto refine/add detail while preserving the original composition, lighting and\ncolour. Keep it generic for high tile counts to avoid hallucinated content.\n\nCONTROLS\n- Image        : source image to refine.\n- Scale Factor : how much to upscale before refining (2 = 2x).\n- Tile Size    : generation resolution per tile (1024 recommended).\n- Cell Size    : resolution of each cell in the 3x3 position map. Lower = fewer\n                 tokens / less VRAM (256 is a good balance; 512 is sharper but\n                 ~4x heavier).\n- Blend Amount : tile-overlap blending when stitching. Raise it (e.g. 128) to\n                 hide seams. Must be <= the overlap between tiles.\n\nTIPS\n- Large image x high scale = many tiles = long runtime and high VRAM. Start\n  small to validate, then scale up.\n- VRAM is driven mostly by the position-map token count — lower Cell Size if\n  you run out.\n- If seams remain visible, raise Blend Amount and/or switch the Merge node's\n  blend mode to Linear.\n",
+  "exposedFields": [],
+  "meta": {
+    "category": "user",
+    "version": "4.0.0"
+  },
+  "id": "6cb6822e-5b3f-44b0-ae9d-ff17626e2b9d",
+  "form": {
+    "elements": {
+      "root": {
+        "id": "root",
+        "data": {
+          "layout": "column",
+          "children": [
+            "node-field-MUof6Kt1JL",
+            "node-field-yCrN7ecM9p",
+            "container-oPAKDfkMFs",
+            "container-ESnUntLRqz"
+          ]
+        },
+        "type": "container"
+      },
+      "node-field-MUof6Kt1JL": {
+        "id": "node-field-MUof6Kt1JL",
+        "type": "node-field",
+        "parentId": "root",
+        "data": {
+          "fieldIdentifier": {
+            "nodeId": "positive_prompt:M54jByNLdd",
+            "fieldName": "value"
+          },
+          "settings": {
+            "type": "string-field-config",
+            "component": "input"
+          },
+          "showDescription": true
+        }
+      },
+      "node-field-yCrN7ecM9p": {
+        "id": "node-field-yCrN7ecM9p",
+        "type": "node-field",
+        "parentId": "root",
+        "data": {
+          "fieldIdentifier": {
+            "nodeId": "d55c2337-fe3c-400d-8576-a732271e8e15",
+            "fieldName": "image"
+          },
+          "showDescription": true
+        }
+      },
+      "node-field-IO8CyGHFBk": {
+        "id": "node-field-IO8CyGHFBk",
+        "type": "node-field",
+        "parentId": "container-oPAKDfkMFs",
+        "data": {
+          "fieldIdentifier": {
+            "nodeId": "57495393-6dd9-4187-ae8b-ca1752076dbf",
+            "fieldName": "cell_size"
+          },
+          "settings": {
+            "type": "integer-field-config",
+            "showShuffle": false,
+            "component": "number-input"
+          },
+          "showDescription": true
+        }
+      },
+      "node-field-9WsQm8ozRY": {
+        "id": "node-field-9WsQm8ozRY",
+        "type": "node-field",
+        "parentId": "container-oPAKDfkMFs",
+        "data": {
+          "fieldIdentifier": {
+            "nodeId": "a518441f-e3dc-4cd9-9509-6e3c9364d7d8",
+            "fieldName": "blend_amount"
+          },
+          "settings": {
+            "type": "integer-field-config",
+            "showShuffle": false,
+            "component": "number-input"
+          },
+          "showDescription": true
+        }
+      },
+      "node-field-h0QKuXn3kn": {
+        "id": "node-field-h0QKuXn3kn",
+        "type": "node-field",
+        "parentId": "container-S6QTvD5Rll",
+        "data": {
+          "fieldIdentifier": {
+            "nodeId": "8dc8d962-c891-4d27-b406-6fff2618c41f",
+            "fieldName": "lora"
+          },
+          "showDescription": true
+        }
+      },
+      "node-field-uDZ2Vc2WnV": {
+        "id": "node-field-uDZ2Vc2WnV",
+        "type": "node-field",
+        "parentId": "container-oPAKDfkMFs",
+        "data": {
+          "fieldIdentifier": {
+            "nodeId": "0ce11c76-0004-496e-b9e8-ca35f90cb0a4",
+            "fieldName": "tile_size"
+          },
+          "settings": {
+            "type": "integer-field-config",
+            "showShuffle": false,
+            "component": "number-input"
+          },
+          "showDescription": true
+        }
+      },
+      "container-oPAKDfkMFs": {
+        "id": "container-oPAKDfkMFs",
+        "parentId": "root",
+        "type": "container",
+        "data": {
+          "layout": "row",
+          "children": [
+            "node-field-IO8CyGHFBk",
+            "node-field-9WsQm8ozRY",
+            "node-field-uDZ2Vc2WnV",
+            "node-field-WN5nspTL28"
+          ]
+        }
+      },
+      "node-field-80p65eYCi3": {
+        "id": "node-field-80p65eYCi3",
+        "type": "node-field",
+        "parentId": "container-S6QTvD5Rll",
+        "data": {
+          "fieldIdentifier": {
+            "nodeId": "flux2_klein_model_loader:QHDIkIVIsj",
+            "fieldName": "model"
+          },
+          "showDescription": true
+        }
+      },
+      "node-field-EpLRyZzNxg": {
+        "id": "node-field-EpLRyZzNxg",
+        "type": "node-field",
+        "parentId": "container-04dR6ib3M6",
+        "data": {
+          "fieldIdentifier": {
+            "nodeId": "flux2_klein_model_loader:QHDIkIVIsj",
+            "fieldName": "vae_model"
+          },
+          "showDescription": true
+        }
+      },
+      "node-field-kz5gC9lrNg": {
+        "id": "node-field-kz5gC9lrNg",
+        "type": "node-field",
+        "parentId": "container-04dR6ib3M6",
+        "data": {
+          "fieldIdentifier": {
+            "nodeId": "flux2_klein_model_loader:QHDIkIVIsj",
+            "fieldName": "qwen3_encoder_model"
+          },
+          "showDescription": true
+        }
+      },
+      "container-ESnUntLRqz": {
+        "id": "container-ESnUntLRqz",
+        "parentId": "root",
+        "type": "container",
+        "data": {
+          "layout": "row",
+          "children": [
+            "container-S6QTvD5Rll",
+            "container-04dR6ib3M6"
+          ]
+        }
+      },
+      "container-S6QTvD5Rll": {
+        "id": "container-S6QTvD5Rll",
+        "parentId": "container-ESnUntLRqz",
+        "type": "container",
+        "data": {
+          "layout": "row",
+          "children": [
+            "node-field-80p65eYCi3",
+            "node-field-h0QKuXn3kn"
+          ]
+        }
+      },
+      "container-04dR6ib3M6": {
+        "id": "container-04dR6ib3M6",
+        "parentId": "container-ESnUntLRqz",
+        "type": "container",
+        "data": {
+          "layout": "row",
+          "children": [
+            "node-field-kz5gC9lrNg",
+            "node-field-EpLRyZzNxg"
+          ]
+        }
+      },
+      "node-field-WN5nspTL28": {
+        "id": "node-field-WN5nspTL28",
+        "type": "node-field",
+        "parentId": "container-oPAKDfkMFs",
+        "data": {
+          "fieldIdentifier": {
+            "nodeId": "0ce11c76-0004-496e-b9e8-ca35f90cb0a4",
+            "fieldName": "scale_factor"
+          },
+          "settings": {
+            "type": "float-field-config",
+            "showShuffle": false,
+            "component": "number-input"
+          },
+          "showDescription": true
+        }
+      }
+    },
+    "rootElementId": "root"
+  },
+  "nodes": [
+    {
+      "id": "positive_prompt:M54jByNLdd",
+      "type": "invocation",
+      "data": {
+        "id": "positive_prompt:M54jByNLdd",
+        "version": "1.0.1",
+        "nodePack": "invokeai",
+        "label": "",
+        "notes": "",
+        "type": "string",
+        "inputs": {
+          "value": {
+            "name": "value",
+            "label": "Prompt",
+            "description": "",
+            "value": "RFNTILE. refine and add detail to this upscaled tile. Preserve the original lighting, colour, contrast, and composition exactly as shown"
+          }
+        },
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true
+      },
+      "position": {
+        "x": -839.6728888888881,
+        "y": 683.9039999999997
+      }
+    },
+    {
+      "id": "seed:vgLfOhJZOI",
+      "type": "invocation",
+      "data": {
+        "id": "seed:vgLfOhJZOI",
+        "version": "1.0.1",
+        "nodePack": "invokeai",
+        "label": "",
+        "notes": "",
+        "type": "integer",
+        "inputs": {
+          "value": {
+            "name": "value",
+            "label": "",
+            "description": "",
+            "value": 5
+          }
+        },
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true
+      },
+      "position": {
+        "x": -819.4696703723957,
+        "y": 1262.7667845421192
+      }
+    },
+    {
+      "id": "flux2_klein_model_loader:QHDIkIVIsj",
+      "type": "invocation",
+      "data": {
+        "id": "flux2_klein_model_loader:QHDIkIVIsj",
+        "version": "1.0.0",
+        "nodePack": "invokeai",
+        "label": "",
+        "notes": "",
+        "type": "flux2_klein_model_loader",
+        "inputs": {
+          "model": {
+            "name": "model",
+            "label": "",
+            "description": "",
+            "value": {
+              "key": "44e8f2c5-f60c-4560-97ca-d9ab428bf6e0",
+              "hash": "blake3:a7b3a1980010947196c81f93708924ea20a5abf187a9f80c66dae41916199a7a",
+              "name": "flux-2-klein-9b-kv",
+              "base": "flux2",
+              "type": "main"
+            }
+          },
+          "vae_model": {
+            "name": "vae_model",
+            "label": "",
+            "description": "",
+            "value": {
+              "key": "418e2a4a-11cb-4f0f-929f-80effedaa342",
+              "hash": "blake3:fcb1d172993424c66d325d139863ccbaadf64a920073b2d005d73a31fa5a851d",
+              "name": "flux2-vae",
+              "base": "flux2",
+              "type": "vae",
+              "submodel_type": null
+            }
+          },
+          "qwen3_encoder_model": {
+            "name": "qwen3_encoder_model",
+            "label": "",
+            "description": "",
+            "value": {
+              "key": "8315c891-00fc-48b9-964f-594a9f6c5dd6",
+              "hash": "blake3:6e075230092bd1fcf5291db020f9bdef68ead4c9904ff1494a4ab96f085c92ad",
+              "name": "qwen3_8b",
+              "base": "any",
+              "type": "qwen3_encoder"
+            }
+          },
+          "qwen3_source_model": {
+            "name": "qwen3_source_model",
+            "label": "",
+            "description": ""
+          },
+          "max_seq_len": {
+            "name": "max_seq_len",
+            "label": "",
+            "description": "",
+            "value": 512
+          }
+        },
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true
+      },
+      "position": {
+        "x": -836.8568888888885,
+        "y": 873.8773333333331
+      }
+    },
+    {
+      "id": "flux2_klein_text_encoder:XrGKddQyxO",
+      "type": "invocation",
+      "data": {
+        "id": "flux2_klein_text_encoder:XrGKddQyxO",
+        "version": "1.1.1",
+        "nodePack": "invokeai",
+        "label": "",
+        "notes": "",
+        "type": "flux2_klein_text_encoder",
+        "inputs": {
+          "prompt": {
+            "name": "prompt",
+            "label": "",
+            "description": ""
+          },
+          "qwen3_encoder": {
+            "name": "qwen3_encoder",
+            "label": "",
+            "description": ""
+          },
+          "max_seq_len": {
+            "name": "max_seq_len",
+            "label": "",
+            "description": "",
+            "value": 512
+          },
+          "mask": {
+            "name": "mask",
+            "label": "",
+            "description": ""
+          }
+        },
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true
+      },
+      "position": {
+        "x": -393.44890290377157,
+        "y": 962.255004437553
+      }
+    },
+    {
+      "id": "core_metadata:NOu0c1hcTj",
+      "type": "invocation",
+      "data": {
+        "id": "core_metadata:NOu0c1hcTj",
+        "version": "2.1.0",
+        "nodePack": "invokeai",
+        "label": "",
+        "notes": "",
+        "type": "core_metadata",
+        "inputs": {
+          "generation_mode": {
+            "name": "generation_mode",
+            "label": "",
+            "description": "",
+            "value": "flux2_txt2img"
+          },
+          "positive_prompt": {
+            "name": "positive_prompt",
+            "label": "",
+            "description": ""
+          },
+          "negative_prompt": {
+            "name": "negative_prompt",
+            "label": "",
+            "description": ""
+          },
+          "width": {
+            "name": "width",
+            "label": "",
+            "description": "",
+            "value": 1024
+          },
+          "height": {
+            "name": "height",
+            "label": "",
+            "description": "",
+            "value": 1024
+          },
+          "seed": {
+            "name": "seed",
+            "label": "",
+            "description": ""
+          },
+          "rand_device": {
+            "name": "rand_device",
+            "label": "",
+            "description": ""
+          },
+          "cfg_scale": {
+            "name": "cfg_scale",
+            "label": "",
+            "description": ""
+          },
+          "cfg_rescale_multiplier": {
+            "name": "cfg_rescale_multiplier",
+            "label": "",
+            "description": ""
+          },
+          "steps": {
+            "name": "steps",
+            "label": "",
+            "description": "",
+            "value": 4
+          },
+          "scheduler": {
+            "name": "scheduler",
+            "label": "",
+            "description": "",
+            "value": "euler"
+          },
+          "seamless_x": {
+            "name": "seamless_x",
+            "label": "",
+            "description": ""
+          },
+          "seamless_y": {
+            "name": "seamless_y",
+            "label": "",
+            "description": ""
+          },
+          "clip_skip": {
+            "name": "clip_skip",
+            "label": "",
+            "description": ""
+          },
+          "model": {
+            "name": "model",
+            "label": "",
+            "description": "",
+            "value": {
+              "key": "dee01ceb-432c-432f-9222-228ba2640746",
+              "hash": "blake3:7e144432a5cec1240741505e42f327c7c1cfc181f49d94e50f473c599713d801",
+              "name": "[4B]FLUX.2 Klein 4B (FP8)",
+              "base": "flux2",
+              "type": "main",
+              "submodel_type": null
+            }
+          },
+          "controlnets": {
+            "name": "controlnets",
+            "label": "",
+            "description": ""
+          },
+          "ipAdapters": {
+            "name": "ipAdapters",
+            "label": "",
+            "description": ""
+          },
+          "t2iAdapters": {
+            "name": "t2iAdapters",
+            "label": "",
+            "description": ""
+          },
+          "loras": {
+            "name": "loras",
+            "label": "",
+            "description": ""
+          },
+          "strength": {
+            "name": "strength",
+            "label": "",
+            "description": ""
+          },
+          "init_image": {
+            "name": "init_image",
+            "label": "",
+            "description": ""
+          },
+          "vae": {
+            "name": "vae",
+            "label": "",
+            "description": "",
+            "value": {
+              "key": "418e2a4a-11cb-4f0f-929f-80effedaa342",
+              "hash": "blake3:fcb1d172993424c66d325d139863ccbaadf64a920073b2d005d73a31fa5a851d",
+              "name": "flux2-vae",
+              "base": "flux2",
+              "type": "vae",
+              "submodel_type": null
+            }
+          },
+          "qwen3_encoder": {
+            "name": "qwen3_encoder",
+            "label": "",
+            "description": "",
+            "value": {
+              "key": "4b6953c7-54ae-4799-858e-38ec7773a3fa",
+              "hash": "blake3:38031f4bbd9078c9c803826813d334ff88f84673ee0f202b78fc44d1f2566463",
+              "name": "Qwen_3_4b-Q3_K_M.gguf",
+              "base": "any",
+              "type": "qwen3_encoder",
+              "submodel_type": null
+            }
+          },
+          "hrf_enabled": {
+            "name": "hrf_enabled",
+            "label": "",
+            "description": ""
+          },
+          "hrf_method": {
+            "name": "hrf_method",
+            "label": "",
+            "description": ""
+          },
+          "hrf_strength": {
+            "name": "hrf_strength",
+            "label": "",
+            "description": ""
+          },
+          "positive_style_prompt": {
+            "name": "positive_style_prompt",
+            "label": "",
+            "description": ""
+          },
+          "negative_style_prompt": {
+            "name": "negative_style_prompt",
+            "label": "",
+            "description": ""
+          },
+          "refiner_model": {
+            "name": "refiner_model",
+            "label": "",
+            "description": ""
+          },
+          "refiner_cfg_scale": {
+            "name": "refiner_cfg_scale",
+            "label": "",
+            "description": ""
+          },
+          "refiner_steps": {
+            "name": "refiner_steps",
+            "label": "",
+            "description": ""
+          },
+          "refiner_scheduler": {
+            "name": "refiner_scheduler",
+            "label": "",
+            "description": ""
+          },
+          "refiner_positive_aesthetic_score": {
+            "name": "refiner_positive_aesthetic_score",
+            "label": "",
+            "description": ""
+          },
+          "refiner_negative_aesthetic_score": {
+            "name": "refiner_negative_aesthetic_score",
+            "label": "",
+            "description": ""
+          },
+          "refiner_start": {
+            "name": "refiner_start",
+            "label": "",
+            "description": ""
+          }
+        },
+        "isOpen": false,
+        "isIntermediate": true,
+        "useCache": true
+      },
+      "position": {
+        "x": -430.01406466286676,
+        "y": 1240.3008720075293
+      }
+    },
+    {
+      "id": "canvas_output:uJVAT857O2",
+      "type": "invocation",
+      "data": {
+        "id": "canvas_output:uJVAT857O2",
+        "version": "1.0.0",
+        "nodePack": "invokeai",
+        "label": "",
+        "notes": "",
+        "type": "flux2_vae_decode",
+        "inputs": {
+          "board": {
+            "name": "board",
+            "label": "",
+            "description": ""
+          },
+          "metadata": {
+            "name": "metadata",
+            "label": "",
+            "description": ""
+          },
+          "latents": {
+            "name": "latents",
+            "label": "",
+            "description": ""
+          },
+          "vae": {
+            "name": "vae",
+            "label": "",
+            "description": ""
+          }
+        },
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true
+      },
+      "position": {
+        "x": 420.86853746170016,
+        "y": 710.6163273200797
+      }
+    },
+    {
+      "id": "f03b4091-e528-44f0-8ae1-5ba05b1ab57d",
+      "type": "invocation",
+      "data": {
+        "id": "f03b4091-e528-44f0-8ae1-5ba05b1ab57d",
+        "type": "flux2_ref_denoise",
+        "version": "0.1.0",
+        "label": "",
+        "notes": "",
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true,
+        "nodePack": "flux2_hildegard_refiner",
+        "inputs": {
+          "latents": {
+            "name": "latents",
+            "label": "",
+            "description": ""
+          },
+          "noise": {
+            "name": "noise",
+            "label": "",
+            "description": ""
+          },
+          "denoise_mask": {
+            "name": "denoise_mask",
+            "label": "",
+            "description": ""
+          },
+          "denoising_start": {
+            "name": "denoising_start",
+            "label": "",
+            "description": "",
+            "value": 0
+          },
+          "denoising_end": {
+            "name": "denoising_end",
+            "label": "",
+            "description": "",
+            "value": 1
+          },
+          "add_noise": {
+            "name": "add_noise",
+            "label": "",
+            "description": "",
+            "value": true
+          },
+          "transformer": {
+            "name": "transformer",
+            "label": "",
+            "description": ""
+          },
+          "positive_text_conditioning": {
+            "name": "positive_text_conditioning",
+            "label": "",
+            "description": ""
+          },
+          "negative_text_conditioning": {
+            "name": "negative_text_conditioning",
+            "label": "",
+            "description": ""
+          },
+          "guidance": {
+            "name": "guidance",
+            "label": "",
+            "description": "",
+            "value": 4
+          },
+          "cfg_scale": {
+            "name": "cfg_scale",
+            "label": "",
+            "description": "",
+            "value": 1
+          },
+          "width": {
+            "name": "width",
+            "label": "",
+            "description": "",
+            "value": 1024
+          },
+          "height": {
+            "name": "height",
+            "label": "",
+            "description": "",
+            "value": 1024
+          },
+          "num_steps": {
+            "name": "num_steps",
+            "label": "",
+            "description": "",
+            "value": 4
+          },
+          "scheduler": {
+            "name": "scheduler",
+            "label": "",
+            "description": "",
+            "value": "euler"
+          },
+          "seed": {
+            "name": "seed",
+            "label": "",
+            "description": "",
+            "value": 0
+          },
+          "vae": {
+            "name": "vae",
+            "label": "",
+            "description": ""
+          },
+          "tile_reference": {
+            "name": "tile_reference",
+            "label": "",
+            "description": ""
+          },
+          "position_reference": {
+            "name": "position_reference",
+            "label": "",
+            "description": ""
+          },
+          "global_reference": {
+            "name": "global_reference",
+            "label": "",
+            "description": ""
+          },
+          "tile_weight": {
+            "name": "tile_weight",
+            "label": "",
+            "description": "",
+            "value": 1
+          },
+          "position_weight": {
+            "name": "position_weight",
+            "label": "",
+            "description": "",
+            "value": 1
+          },
+          "global_weight": {
+            "name": "global_weight",
+            "label": "",
+            "description": "",
+            "value": 1
+          }
+        }
+      },
+      "position": {
+        "x": 39.99765359932351,
+        "y": 682.7524608795826
+      }
+    },
+    {
+      "id": "8dc8d962-c891-4d27-b406-6fff2618c41f",
+      "type": "invocation",
+      "data": {
+        "id": "8dc8d962-c891-4d27-b406-6fff2618c41f",
+        "type": "flux2_klein_lora_loader",
+        "version": "1.0.0",
+        "label": "",
+        "notes": "",
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true,
+        "nodePack": "invokeai",
+        "inputs": {
+          "lora": {
+            "name": "lora",
+            "label": "",
+            "description": "",
+            "value": {
+              "key": "78a30c1d-dfe4-4865-89c6-5dc575249cea",
+              "hash": "blake3:de4adf9ab1b45f41ae27b68707bcd4cbec7c55269a728b404dcbd92c11f1c4ed",
+              "name": "42lux_hildegard-refiner",
+              "base": "flux2",
+              "type": "lora"
+            }
+          },
+          "weight": {
+            "name": "weight",
+            "label": "",
+            "description": "",
+            "value": 1
+          },
+          "transformer": {
+            "name": "transformer",
+            "label": "",
+            "description": ""
+          },
+          "qwen3_encoder": {
+            "name": "qwen3_encoder",
+            "label": "",
+            "description": ""
+          }
+        }
+      },
+      "position": {
+        "x": -401.03613688165365,
+        "y": 694.6917075922532
+      }
+    },
+    {
+      "id": "d55c2337-fe3c-400d-8576-a732271e8e15",
+      "type": "invocation",
+      "data": {
+        "id": "d55c2337-fe3c-400d-8576-a732271e8e15",
+        "type": "image",
+        "version": "1.0.2",
+        "label": "",
+        "notes": "",
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true,
+        "nodePack": "invokeai",
+        "inputs": {
+          "image": {
+            "name": "image",
+            "label": "Start Image",
+            "description": "",
+            "value": {
+              "image_name": "ce153b6d-e07f-48b9-90e9-0d23720420ed.png"
+            }
+          }
+        }
+      },
+      "position": {
+        "x": -1320.8008481176862,
+        "y": 1491.8871270341333
+      }
+    },
+    {
+      "id": "0ce11c76-0004-496e-b9e8-ca35f90cb0a4",
+      "type": "invocation",
+      "data": {
+        "id": "0ce11c76-0004-496e-b9e8-ca35f90cb0a4",
+        "type": "hildegard_plan",
+        "version": "0.1.0",
+        "label": "",
+        "notes": "",
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true,
+        "nodePack": "flux2_hildegard_refiner",
+        "inputs": {
+          "image": {
+            "name": "image",
+            "label": "",
+            "description": ""
+          },
+          "tile_size": {
+            "name": "tile_size",
+            "label": "",
+            "description": "",
+            "value": 1024
+          },
+          "min_overlap": {
+            "name": "min_overlap",
+            "label": "",
+            "description": "",
+            "value": 128
+          },
+          "scale_factor": {
+            "name": "scale_factor",
+            "label": "",
+            "description": "",
+            "value": 2
+          }
+        }
+      },
+      "position": {
+        "x": -909.2338604019417,
+        "y": 1434.802427346433
+      }
+    },
+    {
+      "id": "57495393-6dd9-4187-ae8b-ca1752076dbf",
+      "type": "invocation",
+      "data": {
+        "id": "57495393-6dd9-4187-ae8b-ca1752076dbf",
+        "type": "hildegard_references",
+        "version": "0.1.0",
+        "label": "",
+        "notes": "",
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true,
+        "nodePack": "flux2_hildegard_refiner",
+        "inputs": {
+          "upscaled_image": {
+            "name": "upscaled_image",
+            "label": "",
+            "description": ""
+          },
+          "tile": {
+            "name": "tile",
+            "label": "",
+            "description": ""
+          },
+          "cell_size": {
+            "name": "cell_size",
+            "label": "",
+            "description": "",
+            "value": 256
+          },
+          "draw_marker": {
+            "name": "draw_marker",
+            "label": "",
+            "description": "",
+            "value": true
+          },
+          "tile_high_freq_reduce": {
+            "name": "tile_high_freq_reduce",
+            "label": "",
+            "description": "",
+            "value": 0
+          },
+          "low_freq_radius": {
+            "name": "low_freq_radius",
+            "label": "",
+            "description": "",
+            "value": 32
+          },
+          "global_max_size": {
+            "name": "global_max_size",
+            "label": "",
+            "description": "",
+            "value": 768
+          }
+        }
+      },
+      "position": {
+        "x": -499.9055372686157,
+        "y": 1414.8204234064926
+      }
+    },
+    {
+      "id": "b832cd74-c61d-42d6-a974-a25b1f786502",
+      "type": "invocation",
+      "data": {
+        "id": "b832cd74-c61d-42d6-a974-a25b1f786502",
+        "type": "iterate",
+        "version": "1.1.0",
+        "label": "",
+        "notes": "",
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true,
+        "nodePack": "invokeai",
+        "inputs": {
+          "collection": {
+            "name": "collection",
+            "label": "",
+            "description": ""
+          }
+        }
+      },
+      "position": {
+        "x": -901.2107830624201,
+        "y": 1797.5060746198983
+      }
+    },
+    {
+      "id": "862e2fc6-8071-44de-8132-338c8726bd77",
+      "type": "invocation",
+      "data": {
+        "id": "862e2fc6-8071-44de-8132-338c8726bd77",
+        "type": "pair_tile_image",
+        "version": "1.0.1",
+        "label": "",
+        "notes": "",
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true,
+        "nodePack": "invokeai",
+        "inputs": {
+          "image": {
+            "name": "image",
+            "label": "",
+            "description": ""
+          },
+          "tile": {
+            "name": "tile",
+            "label": "",
+            "description": ""
+          }
+        }
+      },
+      "position": {
+        "x": -135.8394806356093,
+        "y": 1635.227982016745
+      }
+    },
+    {
+      "id": "bdae21ae-6883-42b1-86a0-8d465ce40dd0",
+      "type": "invocation",
+      "data": {
+        "id": "bdae21ae-6883-42b1-86a0-8d465ce40dd0",
+        "type": "collect",
+        "version": "1.1.0",
+        "label": "",
+        "notes": "",
+        "isOpen": true,
+        "isIntermediate": true,
+        "useCache": true,
+        "nodePack": "invokeai",
+        "inputs": {
+          "item": {
+            "name": "item",
+            "label": "",
+            "description": ""
+          },
+          "collection": {
+            "name": "collection",
+            "label": "",
+            "description": ""
+          }
+        }
+      },
+      "position": {
+        "x": 227.46968190876294,
+        "y": 1630.383859849487
+      }
+    },
+    {
+      "id": "a518441f-e3dc-4cd9-9509-6e3c9364d7d8",
+      "type": "invocation",
+      "data": {
+        "id": "a518441f-e3dc-4cd9-9509-6e3c9364d7d8",
+        "type": "merge_tiles_to_image",
+        "version": "1.1.1",
+        "label": "",
+        "notes": "",
+        "isOpen": true,
+        "isIntermediate": false,
+        "useCache": true,
+        "nodePack": "invokeai",
+        "inputs": {
+          "board": {
+            "name": "board",
+            "label": "",
+            "description": "",
+            "value": "auto"
+          },
+          "metadata": {
+            "name": "metadata",
+            "label": "",
+            "description": ""
+          },
+          "tiles_with_images": {
+            "name": "tiles_with_images",
+            "label": "",
+            "description": ""
+          },
+          "blend_mode": {
+            "name": "blend_mode",
+            "label": "",
+            "description": "",
+            "value": "Seam"
+          },
+          "blend_amount": {
+            "name": "blend_amount",
+            "label": "",
+            "description": "",
+            "value": 128
+          }
+        }
+      },
+      "position": {
+        "x": 639.1800532351739,
+        "y": 1412.0467591344059
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "8a7dbdf6-a01b-41b0-bf09-c7e61210eb97",
+      "type": "default",
+      "source": "flux2_klein_model_loader:QHDIkIVIsj",
+      "target": "flux2_klein_text_encoder:XrGKddQyxO",
+      "sourceHandle": "max_seq_len",
+      "targetHandle": "max_seq_len"
+    },
+    {
+      "id": "94894d95-96c2-4bb4-b0b6-b2b7bd26c953",
+      "type": "default",
+      "source": "flux2_klein_model_loader:QHDIkIVIsj",
+      "target": "canvas_output:uJVAT857O2",
+      "sourceHandle": "vae",
+      "targetHandle": "vae"
+    },
+    {
+      "id": "1014d3b1-3e8b-4534-8f55-3890d355adec",
+      "type": "default",
+      "source": "positive_prompt:M54jByNLdd",
+      "target": "flux2_klein_text_encoder:XrGKddQyxO",
+      "sourceHandle": "value",
+      "targetHandle": "prompt"
+    },
+    {
+      "id": "cf44f897-a1aa-43bf-900c-f2f852145d4e",
+      "type": "default",
+      "source": "seed:vgLfOhJZOI",
+      "target": "core_metadata:NOu0c1hcTj",
+      "sourceHandle": "value",
+      "targetHandle": "seed"
+    },
+    {
+      "id": "9cf0b0be-e8c4-4e7b-a065-145b380c186a",
+      "type": "default",
+      "source": "positive_prompt:M54jByNLdd",
+      "target": "core_metadata:NOu0c1hcTj",
+      "sourceHandle": "value",
+      "targetHandle": "positive_prompt"
+    },
+    {
+      "id": "7e8f7d98-5982-44cd-aaec-a74428b6b368",
+      "type": "default",
+      "source": "core_metadata:NOu0c1hcTj",
+      "target": "canvas_output:uJVAT857O2",
+      "sourceHandle": "metadata",
+      "targetHandle": "metadata"
+    },
+    {
+      "id": "reactflow__edge-f03b4091-e528-44f0-8ae1-5ba05b1ab57dlatents-canvas_output:uJVAT857O2latents",
+      "type": "default",
+      "source": "f03b4091-e528-44f0-8ae1-5ba05b1ab57d",
+      "target": "canvas_output:uJVAT857O2",
+      "sourceHandle": "latents",
+      "targetHandle": "latents"
+    },
+    {
+      "id": "reactflow__edge-flux2_klein_text_encoder:XrGKddQyxOconditioning-f03b4091-e528-44f0-8ae1-5ba05b1ab57dpositive_text_conditioning",
+      "type": "default",
+      "source": "flux2_klein_text_encoder:XrGKddQyxO",
+      "target": "f03b4091-e528-44f0-8ae1-5ba05b1ab57d",
+      "sourceHandle": "conditioning",
+      "targetHandle": "positive_text_conditioning"
+    },
+    {
+      "id": "reactflow__edge-flux2_klein_model_loader:QHDIkIVIsjvae-f03b4091-e528-44f0-8ae1-5ba05b1ab57dvae",
+      "type": "default",
+      "source": "flux2_klein_model_loader:QHDIkIVIsj",
+      "target": "f03b4091-e528-44f0-8ae1-5ba05b1ab57d",
+      "sourceHandle": "vae",
+      "targetHandle": "vae"
+    },
+    {
+      "id": "reactflow__edge-seed:vgLfOhJZOIvalue-f03b4091-e528-44f0-8ae1-5ba05b1ab57dseed",
+      "type": "default",
+      "source": "seed:vgLfOhJZOI",
+      "target": "f03b4091-e528-44f0-8ae1-5ba05b1ab57d",
+      "sourceHandle": "value",
+      "targetHandle": "seed"
+    },
+    {
+      "id": "reactflow__edge-flux2_klein_model_loader:QHDIkIVIsjtransformer-8dc8d962-c891-4d27-b406-6fff2618c41ftransformer",
+      "type": "default",
+      "source": "flux2_klein_model_loader:QHDIkIVIsj",
+      "target": "8dc8d962-c891-4d27-b406-6fff2618c41f",
+      "sourceHandle": "transformer",
+      "targetHandle": "transformer"
+    },
+    {
+      "id": "reactflow__edge-8dc8d962-c891-4d27-b406-6fff2618c41ftransformer-f03b4091-e528-44f0-8ae1-5ba05b1ab57dtransformer",
+      "type": "default",
+      "source": "8dc8d962-c891-4d27-b406-6fff2618c41f",
+      "target": "f03b4091-e528-44f0-8ae1-5ba05b1ab57d",
+      "sourceHandle": "transformer",
+      "targetHandle": "transformer"
+    },
+    {
+      "id": "reactflow__edge-flux2_klein_model_loader:QHDIkIVIsjqwen3_encoder-8dc8d962-c891-4d27-b406-6fff2618c41fqwen3_encoder",
+      "type": "default",
+      "source": "flux2_klein_model_loader:QHDIkIVIsj",
+      "target": "8dc8d962-c891-4d27-b406-6fff2618c41f",
+      "sourceHandle": "qwen3_encoder",
+      "targetHandle": "qwen3_encoder"
+    },
+    {
+      "id": "reactflow__edge-8dc8d962-c891-4d27-b406-6fff2618c41fqwen3_encoder-flux2_klein_text_encoder:XrGKddQyxOqwen3_encoder",
+      "type": "default",
+      "source": "8dc8d962-c891-4d27-b406-6fff2618c41f",
+      "target": "flux2_klein_text_encoder:XrGKddQyxO",
+      "sourceHandle": "qwen3_encoder",
+      "targetHandle": "qwen3_encoder"
+    },
+    {
+      "id": "reactflow__edge-d55c2337-fe3c-400d-8576-a732271e8e15image-0ce11c76-0004-496e-b9e8-ca35f90cb0a4image",
+      "type": "default",
+      "source": "d55c2337-fe3c-400d-8576-a732271e8e15",
+      "target": "0ce11c76-0004-496e-b9e8-ca35f90cb0a4",
+      "sourceHandle": "image",
+      "targetHandle": "image"
+    },
+    {
+      "id": "reactflow__edge-57495393-6dd9-4187-ae8b-ca1752076dbftile_reference-f03b4091-e528-44f0-8ae1-5ba05b1ab57dtile_reference",
+      "type": "default",
+      "source": "57495393-6dd9-4187-ae8b-ca1752076dbf",
+      "target": "f03b4091-e528-44f0-8ae1-5ba05b1ab57d",
+      "sourceHandle": "tile_reference",
+      "targetHandle": "tile_reference"
+    },
+    {
+      "id": "reactflow__edge-57495393-6dd9-4187-ae8b-ca1752076dbfglobal_reference-f03b4091-e528-44f0-8ae1-5ba05b1ab57dglobal_reference",
+      "type": "default",
+      "source": "57495393-6dd9-4187-ae8b-ca1752076dbf",
+      "target": "f03b4091-e528-44f0-8ae1-5ba05b1ab57d",
+      "sourceHandle": "global_reference",
+      "targetHandle": "global_reference"
+    },
+    {
+      "id": "reactflow__edge-0ce11c76-0004-496e-b9e8-ca35f90cb0a4upscaled_image-57495393-6dd9-4187-ae8b-ca1752076dbfupscaled_image",
+      "type": "default",
+      "source": "0ce11c76-0004-496e-b9e8-ca35f90cb0a4",
+      "target": "57495393-6dd9-4187-ae8b-ca1752076dbf",
+      "sourceHandle": "upscaled_image",
+      "targetHandle": "upscaled_image"
+    },
+    {
+      "id": "reactflow__edge-0ce11c76-0004-496e-b9e8-ca35f90cb0a4tiles-b832cd74-c61d-42d6-a974-a25b1f786502collection",
+      "type": "default",
+      "source": "0ce11c76-0004-496e-b9e8-ca35f90cb0a4",
+      "target": "b832cd74-c61d-42d6-a974-a25b1f786502",
+      "sourceHandle": "tiles",
+      "targetHandle": "collection"
+    },
+    {
+      "id": "reactflow__edge-b832cd74-c61d-42d6-a974-a25b1f786502item-57495393-6dd9-4187-ae8b-ca1752076dbftile",
+      "type": "default",
+      "source": "b832cd74-c61d-42d6-a974-a25b1f786502",
+      "target": "57495393-6dd9-4187-ae8b-ca1752076dbf",
+      "sourceHandle": "item",
+      "targetHandle": "tile"
+    },
+    {
+      "id": "reactflow__edge-57495393-6dd9-4187-ae8b-ca1752076dbftile-862e2fc6-8071-44de-8132-338c8726bd77tile",
+      "type": "default",
+      "source": "57495393-6dd9-4187-ae8b-ca1752076dbf",
+      "target": "862e2fc6-8071-44de-8132-338c8726bd77",
+      "sourceHandle": "tile",
+      "targetHandle": "tile"
+    },
+    {
+      "id": "reactflow__edge-canvas_output:uJVAT857O2image-862e2fc6-8071-44de-8132-338c8726bd77image",
+      "type": "default",
+      "source": "canvas_output:uJVAT857O2",
+      "target": "862e2fc6-8071-44de-8132-338c8726bd77",
+      "sourceHandle": "image",
+      "targetHandle": "image"
+    },
+    {
+      "id": "reactflow__edge-862e2fc6-8071-44de-8132-338c8726bd77tile_with_image-bdae21ae-6883-42b1-86a0-8d465ce40dd0item",
+      "type": "default",
+      "source": "862e2fc6-8071-44de-8132-338c8726bd77",
+      "target": "bdae21ae-6883-42b1-86a0-8d465ce40dd0",
+      "sourceHandle": "tile_with_image",
+      "targetHandle": "item"
+    },
+    {
+      "id": "reactflow__edge-bdae21ae-6883-42b1-86a0-8d465ce40dd0collection-a518441f-e3dc-4cd9-9509-6e3c9364d7d8tiles_with_images",
+      "type": "default",
+      "source": "bdae21ae-6883-42b1-86a0-8d465ce40dd0",
+      "target": "a518441f-e3dc-4cd9-9509-6e3c9364d7d8",
+      "sourceHandle": "collection",
+      "targetHandle": "tiles_with_images"
+    },
+    {
+      "id": "reactflow__edge-core_metadata:NOu0c1hcTjmetadata-a518441f-e3dc-4cd9-9509-6e3c9364d7d8metadata",
+      "type": "default",
+      "source": "core_metadata:NOu0c1hcTj",
+      "target": "a518441f-e3dc-4cd9-9509-6e3c9364d7d8",
+      "sourceHandle": "metadata",
+      "targetHandle": "metadata"
+    },
+    {
+      "id": "reactflow__edge-57495393-6dd9-4187-ae8b-ca1752076dbfposition_reference-f03b4091-e528-44f0-8ae1-5ba05b1ab57dposition_reference",
+      "type": "default",
+      "source": "57495393-6dd9-4187-ae8b-ca1752076dbf",
+      "target": "f03b4091-e528-44f0-8ae1-5ba05b1ab57d",
+      "sourceHandle": "position_reference",
+      "targetHandle": "position_reference"
+    }
+  ]
+}
