@@ -3,6 +3,13 @@
 Port of the [42lux ComfyUI Hildegard-Refiner](https://github.com/42lux/ComfyUI-42lux-Hildegard-Refiner)
 reference-latent scheme to InvokeAI, for tile-based refinement with FLUX.2 Klein.
 
+![Example workflow](docs/workflow.png)
+
+The workflow bundled in [`example_workflows/`](example_workflows/) wires all three nodes together:
+**Hildegard Plan** upscales and lays out the tile grid, **Hildegard References (Split)** produces the
+tile / position / global reference images per tile, **FLUX2 Ref Denoise** refines each tile against
+them, and Invoke's stock *Merge Tiles to Image* stitches the result back together.
+
 ## Nodes
 
 ### FLUX2 Ref Denoise (Hildegard) — `flux2_ref_denoise`
