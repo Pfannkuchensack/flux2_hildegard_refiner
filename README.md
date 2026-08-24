@@ -48,3 +48,17 @@ upscaled tile latents + `denoising_start` for an img2img-style pass.
 Prototype / de-risking. The reference **positioning** mirrors Invoke's native
 `Flux2RefImageExtension` (diffusers-aligned). If the LoRA misbehaves, the
 positioning is the first knob to revisit.
+
+## Credits and license
+
+The reference-latent scheme is derived from the **GPL-3.0**
+[ComfyUI-42lux-Hildegard-Refiner](https://github.com/42lux/ComfyUI-42lux-Hildegard-Refiner) by
+**42lux** — specifically the three-latent reference layout (tile / position / global) and its
+`T = 10, 20, 30` token offsets.
+
+`FLUX2 Ref Denoise` additionally starts from InvokeAI's stock `FLUX2 Denoise` node (Apache-2.0,
+© the InvokeAI contributors), with the built-in `kontext_conditioning` reference path replaced.
+Apache-2.0 code may be combined into a GPL-3.0 work; the reverse is not permitted — which is why this
+ships as a separate pack rather than as a patch to InvokeAI itself.
+
+GPL-3.0. See [LICENSE](LICENSE). Original mechanism © 42lux, ComfyUI-42lux-Hildegard-Refiner.
