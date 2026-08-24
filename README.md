@@ -3,6 +3,20 @@
 Port of the [42lux ComfyUI Hildegard-Refiner](https://github.com/42lux/ComfyUI-42lux-Hildegard-Refiner)
 reference-latent scheme to InvokeAI, for tile-based refinement with FLUX.2 Klein.
 
+![Before and after](docs/before-after.jpg)
+
+A 1024² source refined to 2048² with `Tile Size 1024`, `Min Overlap 128`, `Scale Factor 2` —
+nine tiles, four steps each. Composition, colour and lighting stay put; the detail is rebuilt.
+At 100% the difference is the point:
+
+![Detail crops at 100%](docs/detail-crops.jpg)
+
+Both crops are the same pixel region in both images — the source upscaled 2× on the left, the
+refined result on the right. Note what each row shows: the apple gains real surface structure,
+while the newsprint is **invented**, not recovered. A refiner cannot read text that was never
+resolved in the source; it produces convincing letterforms where there was mush. Judge it on
+texture, not on legibility.
+
 ![Example workflow](docs/workflow.png)
 
 The workflow bundled in [`example_workflows/`](example_workflows/) wires all three nodes together:
