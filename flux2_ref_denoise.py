@@ -13,12 +13,11 @@ A fork of the stock ``Flux2DenoiseInvocation`` that replaces the built-in
 The reference latents are concatenated and handed to the backend ``denoise()``
 function via its ``img_cond_seq`` / ``img_cond_seq_ids`` parameters - exactly
 the same injection point the stock node uses, so the rest of the FLUX.2 Klein
-denoise loop (LoRA patching, BN normalization, scheduler) is byte-for-byte the
-stock behaviour.
+denoise loop (LoRA patching, BN normalization, scheduler) follows the stock
+behaviour.
 
-This node is for de-risking: does the Hildegard LoRA respond sensibly when we
-feed it reference latents with our own positioning? Start here, then port the
-Plan / Split / Combine pixel nodes around it.
+This version targets InvokeAI 7.x. The InvokeAI 6.x version lives on the
+``v6`` branch of this repository.
 """
 
 from contextlib import ExitStack
@@ -46,26 +45,36 @@ from invokeai.app.services.shared.invocation_context import InvocationContext
 from invokeai.backend.flux.sampling_utils import clip_timestep_schedule_fractional
 from invokeai.backend.flux.schedulers import FLUX_SCHEDULER_LABELS, FLUX_SCHEDULER_MAP, FLUX_SCHEDULER_NAME_VALUES
 from invokeai.backend.flux2.denoise import denoise
-from invokeai.backend.flux2.ref_image_extension import generate_img_ids_flux2_with_offset
+from invokeai.backend.flux2.denoise_working_memory import estimate_flux2_denoise_working_memory
+from invokeai.backend.flux2.latent_norm import bn_denormalize, bn_normalize, read_vae_bn_stats
+from invokeai.backend.flux2.ref_image_extension import encode_reference_image, generate_img_ids_flux2_with_offset
 from invokeai.backend.flux2.sampling_utils import (
     compute_empirical_mu,
     generate_img_ids_flux2,
     get_noise_flux2,
     get_schedule_flux2,
     pack_flux2,
+    redensify_schedule_flux2,
+    time_shift_flux2,
     unpack_flux2,
 )
-from invokeai.backend.model_manager.taxonomy import BaseModelType, ModelFormat, ModelType
-from invokeai.backend.patches.layer_patcher import LayerPatcher
+from invokeai.backend.model_manager.configs.flux2_variant import flux2_hidden_size
+from invokeai.backend.model_manager.taxonomy import BaseModelType, ModelType
+from invokeai.backend.patches.layer_patcher import LayerPatcher, PatchSpec
 from invokeai.backend.patches.lora_conversions.flux_bfl_peft_lora_conversion_utils import (
     convert_bfl_lora_patch_to_diffusers,
 )
 from invokeai.backend.patches.lora_conversions.flux_lora_constants import FLUX_LORA_TRANSFORMER_PREFIX
 from invokeai.backend.patches.model_patch_raw import ModelPatchRaw
+from invokeai.backend.quantization.dequantizing_linear import requires_sidecar_patching
 from invokeai.backend.rectified_flow.rectified_flow_inpaint_extension import RectifiedFlowInpaintExtension
 from invokeai.backend.stable_diffusion.diffusers_pipeline import PipelineIntermediateState
 from invokeai.backend.stable_diffusion.diffusion.conditioning_data import FLUXConditioningInfo
 from invokeai.backend.util.devices import TorchDevice
+from invokeai.backend.util.sage_attention import sage_attention_scope
+
+# Widest FLUX.2 transformer ([dev]); used to price working memory when the variant is unknown.
+FLUX2_MAX_HIDDEN_SIZE = 6144
 
 
 @invocation(
@@ -164,41 +173,6 @@ class Flux2RefDenoiseInvocation(BaseInvocation):
     global_weight: float = InputField(default=1.0, ge=0.0, le=4.0, description="Weight for the global reference.")
 
     # ------------------------------------------------------------------ #
-    # BN statistics helpers (copied verbatim from Flux2DenoiseInvocation) #
-    # ------------------------------------------------------------------ #
-    def _get_bn_stats(self, context: InvocationContext) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        with context.models.load(self.vae.vae).model_on_device() as (_, vae):
-            vae.eval()
-            bn_layer = None
-            if hasattr(vae, "bn"):
-                bn_layer = vae.bn
-            elif hasattr(vae, "batch_norm"):
-                bn_layer = vae.batch_norm
-            elif hasattr(vae, "encoder") and hasattr(vae.encoder, "bn"):
-                bn_layer = vae.encoder.bn
-
-            if bn_layer is None:
-                return None
-            if bn_layer.running_mean is None or bn_layer.running_var is None:
-                return None
-
-            bn_mean = bn_layer.running_mean.clone()
-            bn_var = bn_layer.running_var.clone()
-            bn_eps = bn_layer.eps if hasattr(bn_layer, "eps") else 1e-4
-            bn_std = torch.sqrt(bn_var + bn_eps)
-        return bn_mean, bn_std
-
-    def _bn_normalize(self, x: torch.Tensor, bn_mean: torch.Tensor, bn_std: torch.Tensor) -> torch.Tensor:
-        bn_mean = bn_mean.to(x.device, x.dtype)
-        bn_std = bn_std.to(x.device, x.dtype)
-        return (x - bn_mean) / bn_std
-
-    def _bn_denormalize(self, x: torch.Tensor, bn_mean: torch.Tensor, bn_std: torch.Tensor) -> torch.Tensor:
-        bn_mean = bn_mean.to(x.device, x.dtype)
-        bn_std = bn_std.to(x.device, x.dtype)
-        return x * bn_std + bn_mean
-
-    # ------------------------------------------------------------------ #
     # Reference latent construction (replaces Flux2RefImageExtension)    #
     # ------------------------------------------------------------------ #
     def _prepare_refs(
@@ -232,85 +206,70 @@ class Flux2RefDenoiseInvocation(BaseInvocation):
         canvas_h = 0
         canvas_w = 0
 
-        to_tensor = tv_transforms.ToTensor()
         vae_info = context.models.load(self.vae.vae)
-        with vae_info.model_on_device() as (_, vae):
-            vae.eval()
-            vae_dtype = next(iter(vae.parameters())).dtype
 
-            for idx, (image_field, weight) in enumerate(slots):
-                image = context.images.get_pil(image_field.image_name).convert("RGB")
+        for idx, (image_field, weight) in enumerate(slots):
+            image = context.images.get_pil(image_field.image_name).convert("RGB")
 
-                # Pixel -> [-1, 1] tensor (NO max-pixel clamp).
-                image_tensor = to_tensor(image) * 2.0 - 1.0
-                image_tensor = image_tensor.unsqueeze(0).to(
-                    device=TorchDevice.choose_torch_device(), dtype=vae_dtype
-                )
+            # Full-resolution encode (NO max-pixel clamp). Untiled where SDPA runs the VAE
+            # mid-block attention fused (CUDA), like the reference ComfyUI pipeline; tiled on
+            # ROCm / MPS or when the untiled encode would not fit the card.
+            lat = encode_reference_image(vae_info, image, tiling="if_attention_materializes")
 
-                latent_dist = vae.encode(image_tensor, return_dict=False)[0]
-                if hasattr(latent_dist, "mode"):
-                    lat = latent_dist.mode()  # deterministic encode
-                elif hasattr(latent_dist, "sample"):
-                    lat = latent_dist.sample()
+            batch_size, _, latent_height, latent_width = lat.shape
+
+            # Pad to be compatible with patch_size=2.
+            pad_h = (2 - latent_height % 2) % 2
+            pad_w = (2 - latent_width % 2) % 2
+            if pad_h > 0 or pad_w > 0:
+                lat = F.pad(lat, (0, pad_w, 0, pad_h), mode="circular")
+                _, _, latent_height, latent_width = lat.shape
+
+            packed = pack_flux2(lat).to(device, dtype)  # (B, seq, 128)
+
+            if bn_mean is not None and bn_std is not None:
+                packed = bn_normalize(packed, bn_mean, bn_std)
+
+            # Per-reference weight: scale the (normalized) reference tokens to
+            # modulate how strongly this reference influences attention.
+            if weight != 1.0:
+                packed = packed * weight
+
+            # Spatial canvas tiling (mirrors Flux2RefImageExtension so multiple
+            # references occupy distinct H/W coordinates).
+            h_offset = 0
+            w_offset = 0
+            if idx > 0:
+                potential_h_vertical = canvas_h + latent_height
+                potential_w_horizontal = canvas_w + latent_width
+                if potential_h_vertical > potential_w_horizontal:
+                    w_offset = canvas_w
+                    canvas_w = canvas_w + latent_width
+                    canvas_h = max(canvas_h, latent_height)
                 else:
-                    lat = latent_dist
+                    h_offset = canvas_h
+                    canvas_h = canvas_h + latent_height
+                    canvas_w = max(canvas_w, latent_width)
+            else:
+                canvas_h = latent_height
+                canvas_w = latent_width
 
-                batch_size, _, latent_height, latent_width = lat.shape
+            # T = 10, 20, 30 ... separates reference images from the generated
+            # image (which uses T = 0).
+            t_offset = 10 + 10 * idx
+            ids = generate_img_ids_flux2_with_offset(
+                latent_height=latent_height,
+                latent_width=latent_width,
+                batch_size=batch_size,
+                device=device,
+                idx_offset=t_offset,
+                h_offset=h_offset,
+                w_offset=w_offset,
+            )
 
-                # Pad to be compatible with patch_size=2.
-                pad_h = (2 - latent_height % 2) % 2
-                pad_w = (2 - latent_width % 2) % 2
-                if pad_h > 0 or pad_w > 0:
-                    lat = F.pad(lat, (0, pad_w, 0, pad_h), mode="circular")
-                    _, _, latent_height, latent_width = lat.shape
-
-                packed = pack_flux2(lat).to(device, dtype)  # (B, seq, 128)
-
-                if bn_mean is not None and bn_std is not None:
-                    packed = self._bn_normalize(packed, bn_mean, bn_std)
-
-                # Per-reference weight: scale the (normalized) reference tokens to
-                # modulate how strongly this reference influences attention.
-                if weight != 1.0:
-                    packed = packed * weight
-
-                # Spatial canvas tiling (mirrors Flux2RefImageExtension so multiple
-                # references occupy distinct H/W coordinates).
-                h_offset = 0
-                w_offset = 0
-                if idx > 0:
-                    potential_h_vertical = canvas_h + latent_height
-                    potential_w_horizontal = canvas_w + latent_width
-                    if potential_h_vertical > potential_w_horizontal:
-                        w_offset = canvas_w
-                        canvas_w = canvas_w + latent_width
-                        canvas_h = max(canvas_h, latent_height)
-                    else:
-                        h_offset = canvas_h
-                        canvas_h = canvas_h + latent_height
-                        canvas_w = max(canvas_w, latent_width)
-                else:
-                    canvas_h = latent_height
-                    canvas_w = latent_width
-
-                # T = 10, 20, 30 ... separates reference images from the generated
-                # image (which uses T = 0).
-                t_offset = 10 + 10 * idx
-                ids = generate_img_ids_flux2_with_offset(
-                    latent_height=latent_height,
-                    latent_width=latent_width,
-                    batch_size=batch_size,
-                    device=device,
-                    idx_offset=t_offset,
-                    h_offset=h_offset,
-                    w_offset=w_offset,
-                )
-
-                all_latents.append(packed)
-                all_ids.append(ids)
-                context.util.signal_progress(f"Encoded reference {idx + 1}/{len(slots)}")
-
-            TorchDevice.empty_cache()
+            all_latents.append(packed)
+            all_ids.append(ids)
+            context.util.signal_progress(f"Encoded reference {idx + 1}/{len(slots)}")
 
         return torch.cat(all_latents, dim=1), torch.cat(all_ids, dim=1)
 
@@ -323,6 +282,10 @@ class Flux2RefDenoiseInvocation(BaseInvocation):
         latents = latents.detach().to("cpu")
         name = context.tensors.save(tensor=latents)
         return LatentsOutput.build(latents_name=name, latents=latents, seed=None)
+
+    def _get_bn_stats(self, context: InvocationContext) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+        with context.models.load(self.vae.vae).model_on_device() as (_, vae):
+            return read_vae_bn_stats(vae)
 
     def _run_diffusion(self, context: InvocationContext) -> torch.Tensor:
         inference_dtype = torch.bfloat16
@@ -374,10 +337,22 @@ class Flux2RefDenoiseInvocation(BaseInvocation):
         transformer_config = context.models.get_config(self.transformer.transformer)
         assert transformer_config.base == BaseModelType.Flux2 and transformer_config.type == ModelType.Main
 
+        # InvokeAI 7 schedule: linear sigmas shifted by mu up front (the scheduler no longer
+        # shifts internally and denoise() no longer takes mu). Shift before clipping so
+        # denoising_start / denoising_end select from the schedule the model actually runs.
         image_seq_len = packed_h * packed_w
-        timesteps = get_schedule_flux2(num_steps=self.num_steps, image_seq_len=image_seq_len)
         mu = compute_empirical_mu(image_seq_len=image_seq_len, num_steps=self.num_steps)
+        timesteps = time_shift_flux2(get_schedule_flux2(num_steps=self.num_steps, image_seq_len=image_seq_len), mu)
         timesteps = clip_timestep_schedule_fractional(timesteps, self.denoising_start, self.denoising_end)
+
+        # Manual Euler for img2img / inpainting, or when the requested scheduler is unavailable.
+        uses_manual_euler = (
+            self.denoise_mask is not None or self.denoising_start > 1e-5 or self.scheduler not in FLUX_SCHEDULER_MAP
+        )
+        # Clipping drops steps outside the denoising window; re-space so the requested
+        # number of steps is actually taken (endpoints are preserved).
+        if uses_manual_euler:
+            timesteps = redensify_schedule_flux2(timesteps, self.num_steps, mu)
 
         if init_latents is not None:
             if self.add_noise:
@@ -392,9 +367,6 @@ class Flux2RefDenoiseInvocation(BaseInvocation):
             assert noise is not None
             x = noise
 
-        if len(timesteps) <= 1:
-            return x
-
         img_ids = generate_img_ids_flux2(h=latent_h, w=latent_w, batch_size=b, device=device)
 
         inpaint_mask = self._prep_inpaint_mask(context, x)
@@ -404,15 +376,26 @@ class Flux2RefDenoiseInvocation(BaseInvocation):
         noise_packed = pack_flux2(noise) if noise is not None else None
         x = pack_flux2(x)
 
-        if bn_mean is not None and bn_std is not None:
-            if init_latents_packed is not None:
-                init_latents_packed = self._bn_normalize(init_latents_packed, bn_mean, bn_std)
-                if noise_packed is not None:
-                    noise_packed = self._bn_normalize(noise_packed, bn_mean, bn_std)
-            if init_latents is not None:
-                x = self._bn_normalize(x, bn_mean, bn_std)
+        # The transformer runs in BN-normalized space. Only the init latents are normalized;
+        # the noise is already N(0, 1), so the img2img preblend is rebuilt from the normalized
+        # init latents instead of normalizing the raw mixture (which would shrink the noise
+        # term by bn_std, see InvokeAI #8964).
+        if init_latents_packed is not None:
+            if bn_mean is not None and bn_std is not None:
+                init_latents_packed = bn_normalize(init_latents_packed, bn_mean, bn_std)
+            if self.add_noise:
+                assert noise_packed is not None
+                x = timesteps[0] * noise_packed + (1.0 - timesteps[0]) * init_latents_packed
+            else:
+                x = init_latents_packed
 
         assert packed_h * packed_w == x.shape[1]
+
+        # Nothing left to step: hand the start latents back through the same denormalization.
+        if len(timesteps) <= 1:
+            if bn_mean is not None and bn_std is not None:
+                x = bn_denormalize(x, bn_mean, bn_std)
+            return unpack_flux2(x.float(), self.height, self.width)
 
         inpaint_extension: Optional[RectifiedFlowInpaintExtension] = None
         if inpaint_mask_packed is not None:
@@ -427,44 +410,38 @@ class Flux2RefDenoiseInvocation(BaseInvocation):
         num_steps = len(timesteps) - 1
         cfg_scale_list = [self.cfg_scale] * num_steps
 
-        is_inpainting = self.denoise_mask is not None or self.denoising_start > 1e-5
-
+        # The schedule is already shifted, so the scheduler must not shift again.
         scheduler = None
-        if self.scheduler in FLUX_SCHEDULER_MAP and not is_inpainting:
-            scheduler_class = FLUX_SCHEDULER_MAP[self.scheduler]
-            if self.scheduler == "heun":
-                scheduler = scheduler_class(num_train_timesteps=1000, shift=3.0)
-            else:
-                scheduler = scheduler_class(
-                    num_train_timesteps=1000,
-                    shift=3.0,
-                    use_dynamic_shifting=True,
-                    base_shift=0.5,
-                    max_shift=1.15,
-                    base_image_seq_len=256,
-                    max_image_seq_len=4096,
-                    time_shift_type="exponential",
-                )
+        if not uses_manual_euler:
+            scheduler = FLUX_SCHEDULER_MAP[self.scheduler](num_train_timesteps=1000)
 
         # Build reference latents with our own positioning (no clamp, per-ref weight).
         img_cond_seq, img_cond_seq_ids = self._prepare_refs(context, device, inference_dtype, bn_mean, bn_std)
+        ref_image_seq_len = img_cond_seq.shape[1] if img_cond_seq is not None else 0
 
         with ExitStack() as exit_stack:
-            (cached_weights, transformer) = exit_stack.enter_context(
-                context.models.load(self.transformer.transformer).model_on_device()
-            )
-            config = transformer_config
+            transformer_info = context.models.load(self.transformer.transformer)
 
-            if config.format in [ModelFormat.Diffusers]:
-                model_is_quantized = False
-            elif config.format in [
-                ModelFormat.BnbQuantizedLlmInt8b,
-                ModelFormat.BnbQuantizednf4b,
-                ModelFormat.GGUFQuantized,
-            ]:
-                model_is_quantized = True
-            else:
-                model_is_quantized = False
+            # Reserve the transformer forward's working memory. The full-resolution Hildegard
+            # references make the attended sequence several times the tile itself, so without
+            # this reservation the cache fills the card with weights and the forward OOMs.
+            working_memory = estimate_flux2_denoise_working_memory(
+                transformer_info.model,
+                hidden_size=flux2_hidden_size(getattr(transformer_config, "variant", None)) or FLUX2_MAX_HIDDEN_SIZE,
+                image_seq_len=image_seq_len,
+                ref_image_seq_len=ref_image_seq_len,
+                text_seq_len=max(txt.shape[1], neg_txt.shape[1] if neg_txt is not None else 0),
+                batch_size=x.shape[0],
+                lora_count=len(self.transformer.loras),
+                control_blocks=0,
+                regional_attn_mask=None,
+                device=device,
+                dtype=inference_dtype,
+            )
+
+            (cached_weights, transformer) = exit_stack.enter_context(
+                transformer_info.model_on_device(working_memory=working_memory)
+            )
 
             exit_stack.enter_context(
                 LayerPatcher.apply_smart_model_patches(
@@ -473,7 +450,7 @@ class Flux2RefDenoiseInvocation(BaseInvocation):
                     prefix=FLUX_LORA_TRANSFORMER_PREFIX,
                     dtype=inference_dtype,
                     cached_weights=cached_weights,
-                    force_sidecar_patching=model_is_quantized,
+                    force_sidecar_patching=requires_sidecar_patching(transformer, transformer_config.format),
                 )
             )
 
@@ -483,27 +460,29 @@ class Flux2RefDenoiseInvocation(BaseInvocation):
                 assert img_cond_seq_ids is not None
                 img_cond_seq_ids = img_cond_seq_ids.repeat(x.shape[0], 1, 1)
 
-            x = denoise(
-                model=transformer,
-                img=x,
-                img_ids=img_ids,
-                txt=txt,
-                txt_ids=txt_ids,
-                timesteps=timesteps,
-                step_callback=self._build_step_callback(context),
-                guidance=self.guidance,
-                cfg_scale=cfg_scale_list,
-                neg_txt=neg_txt,
-                neg_txt_ids=neg_txt_ids,
-                scheduler=scheduler,
-                mu=mu,
-                inpaint_extension=inpaint_extension,
-                img_cond_seq=img_cond_seq,
-                img_cond_seq_ids=img_cond_seq_ids,
-            )
+            with sage_attention_scope():
+                x = denoise(
+                    model=transformer,
+                    img=x,
+                    img_ids=img_ids,
+                    txt=txt,
+                    txt_ids=txt_ids,
+                    timesteps=timesteps,
+                    step_callback=self._build_step_callback(context),
+                    guidance=self.guidance,
+                    cfg_scale=cfg_scale_list,
+                    neg_txt=neg_txt,
+                    neg_txt_ids=neg_txt_ids,
+                    scheduler=scheduler,
+                    inpaint_extension=inpaint_extension,
+                    img_cond_seq=img_cond_seq,
+                    img_cond_seq_ids=img_cond_seq_ids,
+                    # LCM re-noises every step; a seeded generator keeps runs reproducible.
+                    generator=torch.Generator(device="cpu").manual_seed(self.seed ^ 0xFFFFFFFF),
+                )
 
         if bn_mean is not None and bn_std is not None:
-            x = self._bn_denormalize(x, bn_mean, bn_std)
+            x = bn_denormalize(x, bn_mean, bn_std)
 
         x = unpack_flux2(x.float(), self.height, self.width)
         return x
@@ -542,13 +521,12 @@ class Flux2RefDenoiseInvocation(BaseInvocation):
         mask = mask.to(device=latents.device, dtype=latents.dtype)
         return mask.expand_as(latents)
 
-    def _lora_iterator(self, context: InvocationContext) -> Iterator[Tuple[ModelPatchRaw, float]]:
+    def _lora_iterator(self, context: InvocationContext) -> Iterator[PatchSpec]:
         for lora in self.transformer.loras:
             lora_info = context.models.load(lora.lora)
             assert isinstance(lora_info.model, ModelPatchRaw)
             converted = convert_bfl_lora_patch_to_diffusers(lora_info.model)
-            yield (converted, lora.weight)
-            del lora_info
+            yield (converted, lora.weight, lora_info.model_in_ram())
 
     def _build_step_callback(self, context: InvocationContext) -> Callable[[PipelineIntermediateState], None]:
         def step_callback(state: PipelineIntermediateState) -> None:

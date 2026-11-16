@@ -3,6 +3,17 @@
 Port of the [42lux ComfyUI Hildegard-Refiner](https://github.com/42lux/ComfyUI-42lux-Hildegard-Refiner)
 reference-latent scheme to InvokeAI, for tile-based refinement with FLUX.2 Klein.
 
+## Compatibility
+
+| InvokeAI | Branch |
+|----------|--------|
+| **7.x**  | [`main`](https://github.com/Pfannkuchensack/flux2_hildegard_refiner/tree/main) |
+| 6.x      | [`v6`](https://github.com/Pfannkuchensack/flux2_hildegard_refiner/tree/v6) |
+
+InvokeAI 7 changed the FLUX.2 denoise backend (the schedule is now shifted up front, so
+`denoise()` no longer takes `mu`). Running the 6.x version of this node on 7.x fails with an
+error about `mu`; update to `main`. If you are still on InvokeAI 6.x, use the `v6` branch.
+
 ![Before and after](docs/before-after.jpg)
 
 A 1024² source refined to 2048² with `Tile Size 1024`, `Min Overlap 128`, `Scale Factor 2` —
